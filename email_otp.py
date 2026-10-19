@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import urllib.request
+import urllib.error
 
 log = logging.getLogger("securechat")
 
@@ -54,8 +55,17 @@ def send_otp_email(to_email: str, code: str) -> bool:
             if 200 <= resp.status < 300:
                 log.info("OTP email sent to %s", to_email)
                 return True
-            log.error("Resend returned HTTP %s for %s", resp.status, to_email)
+            body = resp.read().decode()[:500]
+            log.error("Resend returned HTTP %s for %s: %s",
+                      resp.status, to_email, body)
             return False
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode()[:500]
+        except Exception:
+            body = "<no body>"
+        log.error("Resend HTTP %s for %s: %s", e.code, to_email, body)
+        return False
     except Exception:
         log.exception("failed to send OTP email to %s", to_email)
         return False
