@@ -780,8 +780,10 @@ class Server:
         code_hash = hashlib.sha256(code.encode()).hexdigest()
         await self.store.store_otp(email, code_hash,
                                    time.time() + 600)  # 10 min expiry
-        # best-effort send; still return ok to avoid enumeration
-        send_otp_email(email, code)
+        # best-effort send in background; never block the response
+        import asyncio
+        asyncio.get_event_loop().run_in_executor(
+            None, send_otp_email, email, code)
         log.info("OTP requested for %s", email)
         return web.json_response({"ok": True,
                                   "message": "code sent if email is valid"})
