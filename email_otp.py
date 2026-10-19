@@ -1,11 +1,12 @@
-"""Email OTP delivery via Resend HTTP API.
+"""Email OTP delivery via Brevo HTTP API.
 
 Configuration via environment variables:
-    RESEND_API_KEY   e.g. re_xxxxxxxxxxxx
-    EMAIL_FROM       e.g. "Pingzy <onboarding@resend.dev>"
+    BREVO_API_KEY   e.g. xkeysib-xxxxxxxxxxxx
+    EMAIL_FROM      e.g. "Pingzy <noreply@pingzy.app>"
 
-Railway blocks outbound SMTP, so we use Resend's HTTPS API instead.
-For local development without a key, set RESEND_API_KEY="" and the OTP
+Railway blocks outbound SMTP, and Resend blocks Railway via Cloudflare,
+so we use Brevo's HTTPS API instead.
+For local development without a key, set BREVO_API_KEY="" and the OTP
 code is printed to the server log (DEV ONLY — never in production).
 """
 import json
@@ -18,13 +19,21 @@ log = logging.getLogger("securechat")
 
 
 def send_otp_email(to_email: str, code: str) -> bool:
-    """Send the 6-digit OTP via Resend. Returns True on success."""
-    api_key = os.environ.get("RESEND_API_KEY", "")
-    from_addr = os.environ.get("EMAIL_FROM", "Pingzy <onboarding@resend.dev>")
+    """Send the 6-digit OTP via Brevo. Returns True on success."""
+    api_key = os.environ.get("BREVO_API_KEY", "")
+    from_addr = os.environ.get("EMAIL_FROM", "Pingzy <noreply@pingzy.app>")
+    # Parse "Name <email>" format
+    if "<" in from_addr and ">" in from_addr:
+        name = from_addr.split("<")[0].strip()
+        email = from_addr.split("<")[1].split(">")[0].strip()
+    else:
+        name = "Pingzy"
+        email = from_addr.strip()
+
     if not api_key:
         # DEV MODE: no API key configured — log the code so the developer
         # can complete registration. NEVER enable in production.
-        log.warning("DEV MODE: OTP for %s is %s (configure RESEND_API_KEY "
+        log.warning("DEV MODE: OTP for %s is %s (configure BREVO_API_KEY "
                     "for production)", to_email, code)
         return True
 
@@ -36,17 +45,18 @@ def send_otp_email(to_email: str, code: str) -> bool:
         f"this email.\n"
     )
     payload = json.dumps({
-        "from": from_addr,
-        "to": [to_email],
+        "sender": {"name": name, "email": email},
+        "to": [{"email": to_email}],
         "subject": subject,
-        "text": body,
+        "textContent": body,
     }).encode()
     req = urllib.request.Request(
-        "https://api.resend.com/emails",
+        "https://api.brevo.com/v3/smtp/email",
         data=payload,
         headers={
-            "Authorization": f"Bearer {api_key}",
+            "api-key": api_key,
             "Content-Type": "application/json",
+            "Accept": "application/json",
         },
         method="POST",
     )
@@ -56,7 +66,7 @@ def send_otp_email(to_email: str, code: str) -> bool:
                 log.info("OTP email sent to %s", to_email)
                 return True
             body = resp.read().decode()[:500]
-            log.error("Resend returned HTTP %s for %s: %s",
+            log.error("Brevo returned HTTP %s for %s: %s",
                       resp.status, to_email, body)
             return False
     except urllib.error.HTTPError as e:
@@ -64,7 +74,7 @@ def send_otp_email(to_email: str, code: str) -> bool:
             body = e.read().decode()[:500]
         except Exception:
             body = "<no body>"
-        log.error("Resend HTTP %s for %s: %s", e.code, to_email, body)
+        log.error("Brevo HTTP %s for %s: %s", e.code, to_email, body)
         return False
     except Exception:
         log.exception("failed to send OTP email to %s", to_email)
